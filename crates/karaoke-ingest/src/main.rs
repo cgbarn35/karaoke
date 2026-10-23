@@ -21,7 +21,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Fetch lyrics, analyse them with CC-CEDICT + Claude, and store the song.
+    /// Fetch lyrics, analyse them with CC-CEDICT + an OpenRouter model, and store the song.
     Add(AddArgs),
     /// Copy a user-owned audio file next to the DB and attach it to a song.
     AttachAudio {
@@ -52,9 +52,6 @@ pub struct AddArgs {
     /// Audio file to copy next to the DB.
     #[arg(long)]
     pub audio: Option<PathBuf>,
-    /// Claude model ID used for translation.
-    #[arg(long, default_value = "claude-sonnet-5")]
-    pub model: String,
 }
 
 fn main() -> Result<()> {

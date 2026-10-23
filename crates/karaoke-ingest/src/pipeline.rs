@@ -39,10 +39,10 @@ fn sanitize(s: &str) -> String {
 }
 
 pub fn add(db_path: &Path, a: &AddArgs) -> Result<()> {
-    let key = std::env::var("ANTHROPIC_API_KEY")
+    let key = std::env::var("OPENROUTER_API_KEY")
         .ok()
         .filter(|k| !k.is_empty())
-        .context("ANTHROPIC_API_KEY is not set")?;
+        .context("OPENROUTER_API_KEY is not set")?;
     if let Some(audio) = &a.audio
         && !audio.is_file()
     {
@@ -94,8 +94,8 @@ pub fn add(db_path: &Path, a: &AddArgs) -> Result<()> {
     let cache = db::db_dir(db_path).join("cache");
     let cedict = Cedict::load(&cedict::ensure_downloaded(&client, &cache)?)?;
     let prompt = llm::build_prompt(&a.title, &a.artist, &inputs, &cedict);
-    println!("anthropic: analysing {} lines with {}", inputs.iter().filter(|l| !l.text.is_empty()).count(), a.model);
-    let (analysis, warnings) = llm::analyse(&client, &key, &a.model, &prompt, &inputs, &cedict)?;
+    println!("openrouter: analysing {} lines with {}", inputs.iter().filter(|l| !l.text.is_empty()).count(), llm::MODEL);
+    let (analysis, warnings) = llm::analyse(&client, &key, &prompt, &inputs, &cedict)?;
 
     // 6. Assemble.
     let translations: HashMap<usize, &str> =
@@ -143,7 +143,7 @@ pub fn add(db_path: &Path, a: &AddArgs) -> Result<()> {
         audio_rel_path,
         lyrics_source,
         lrc_raw,
-        translation_model: a.model.clone(),
+        translation_model: llm::MODEL.to_string(),
         lines,
     };
     let mut conn = db::open(db_path)?;

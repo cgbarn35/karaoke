@@ -1,4 +1,4 @@
-//! Song analysis via the Anthropic Messages API (forced tool use) and its validation.
+//! Song analysis via OpenRouter chat completions (forced function call) and its validation.
 
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
@@ -12,6 +12,9 @@ use crate::cedict::Cedict;
 use crate::segment::Token;
 
 const TOOL_NAME: &str = "record_song_analysis";
+
+/// OpenRouter model used for every ingest (chosen once, baked in).
+pub const MODEL: &str = "typesafe/jev-router";
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct SongAnalysis {
@@ -140,57 +143,66 @@ pub fn build_prompt(title: &str, artist: &str, lines: &[LineInput], cedict: &Ced
     p
 }
 
-/// Sends the request and returns the forced tool call's raw `input`.
-fn call_once(client: &Client, key: &str, model: &str, prompt: &str) -> Result<Value> {
+/// Sends the request and returns the forced function call's raw JSON `arguments` string.
+fn call_once(client: &Client, key: &str, prompt: &str) -> Result<String> {
     let body = json!({
-        "model": model,
+        "model": MODEL,
         "max_tokens": 16000,
         "tools": [{
-            "name": TOOL_NAME,
-            "description": "Record the reading, glosses and translation of every line and token of the song.",
-            "input_schema": input_schema(),
+            "type": "function",
+            "function": {
+                "name": TOOL_NAME,
+                "description": "Record the reading, glosses and translation of every line and token of the song.",
+                "parameters": input_schema(),
+            },
         }],
-        "tool_choice": {"type": "tool", "name": TOOL_NAME},
+        "tool_choice": {"type": "function", "function": {"name": TOOL_NAME}},
+        // Only route to providers that honour tools + tool_choice.
+        "provider": {"require_parameters": true},
         "messages": [{"role": "user", "content": prompt}],
     });
     let resp = client
-        .post("https://api.anthropic.com/v1/messages")
-        .header("x-api-key", key)
-        .header("anthropic-version", "2023-06-01")
-        .header("content-type", "application/json")
-        .timeout(Duration::from_secs(300))
+        .post("https://openrouter.ai/api/v1/chat/completions")
+        .bearer_auth(key)
+        .header("HTTP-Referer", "https://github.com/cgbarn35/karaoke")
+        .header("X-Title", "karaoke")
+        .timeout(Duration::from_secs(600))
         .json(&body)
         .send()?;
     let status = resp.status();
     let text = resp.text()?;
     if !status.is_success() {
-        bail!("anthropic: HTTP {status}: {text}");
+        bail!("openrouter: HTTP {status}: {text}");
     }
-    let v: Value = serde_json::from_str(&text).context("anthropic: invalid JSON response")?;
-    if v["stop_reason"] == "max_tokens" {
-        bail!("anthropic: response truncated");
+    let v: Value = serde_json::from_str(&text).context("openrouter: invalid JSON response")?;
+    if !v["error"].is_null() {
+        bail!("openrouter: error: {}", v["error"]);
     }
-    v["content"]
+    let choice = &v["choices"][0];
+    if choice["finish_reason"] == "length" {
+        bail!("openrouter: response truncated");
+    }
+    choice["message"]["tool_calls"]
         .as_array()
-        .and_then(|c| c.iter().find(|b| b["type"] == "tool_use"))
-        .map(|b| b["input"].clone())
-        .ok_or_else(|| anyhow!("anthropic: no tool_use block in response"))
+        .and_then(|calls| calls.iter().find(|c| c["function"]["name"] == TOOL_NAME))
+        .and_then(|c| c["function"]["arguments"].as_str())
+        .map(str::to_string)
+        .ok_or_else(|| anyhow!("openrouter: no {TOOL_NAME} call in response: {}", choice["message"]))
 }
 
 /// Calls the model and validates the result, retrying once if the output is malformed or invalid.
 pub fn analyse(
     client: &Client,
     key: &str,
-    model: &str,
     prompt: &str,
     lines: &[LineInput],
     cedict: &Cedict,
 ) -> Result<(SongAnalysis, Vec<String>)> {
     // Outer Err = transport/HTTP failure (not retried); inner Err = model drift (retried).
     let attempt = || -> Result<Result<(SongAnalysis, Vec<String>)>> {
-        let input = call_once(client, key, model, prompt)?;
-        Ok(serde_json::from_value::<SongAnalysis>(input)
-            .context("tool input does not match the schema")
+        let args = call_once(client, key, prompt)?;
+        Ok(serde_json::from_str::<SongAnalysis>(&args)
+            .context("tool arguments do not match the schema")
             .and_then(|a| validate(a, lines, cedict)))
     };
     match attempt()? {
