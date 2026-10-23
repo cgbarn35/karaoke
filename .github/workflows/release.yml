@@ -1,0 +1,28 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --workspace
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force karaoke-windows-x64 | Out-Null
+          Copy-Item target/release/karaoke.exe, target/release/karaoke-ingest.exe, README.md, LICENSE karaoke-windows-x64/
+          Compress-Archive -Path karaoke-windows-x64 -DestinationPath karaoke-windows-x64.zip -Force
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: karaoke-windows-x64.zip

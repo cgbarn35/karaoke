@@ -1,0 +1,72 @@
+# karaoke
+
+A fast desktop karaoke player for Mandarin songs. Every lyric character is shown with its 汉字,
+tone-marked pinyin and a short English gloss; multi-character words get a word gloss, and each
+line gets a full English translation. Characters are wipe-highlighted in time with the song, and
+clicking a character opens its CC-CEDICT dictionary entries.
+
+All song data lives in a SQLite database. Readings, glosses and translations are computed once by
+the `karaoke-ingest` CLI (CC-CEDICT + jieba segmentation + the Claude API); the player never
+touches the network.
+
+Rust workspace:
+
+| Crate | What |
+|---|---|
+| `crates/karaoke-core` | SQLite schema/API, LRC parser, pinyin and timing helpers |
+| `crates/karaoke-ingest` | `karaoke-ingest` CLI: fetch lyrics, analyse, store |
+| `crates/karaoke-app` | `karaoke` GUI (egui/eframe, rodio audio) |
+
+## Build
+
+- Windows, from WSL: `scripts/build-windows.sh` cross-builds `dist/karaoke.exe`
+  (needs the `x86_64-pc-windows-gnu` target and mingw-w64).
+- Native: `cargo build --release` builds both `karaoke` and `karaoke-ingest`.
+- Prebuilt Windows binaries are attached to each [GitHub release](https://github.com/cgbarn35/karaoke/releases).
+
+## Adding songs
+
+```sh
+export ANTHROPIC_API_KEY=...            # used only by the ingest CLI
+karaoke-ingest add --title 月亮代表我的心 --artist 邓丽君
+karaoke-ingest list
+karaoke-ingest attach-audio --song-id 1 --audio ~/Music/moon.mp3
+```
+
+- `--db <path>` (before the subcommand) selects the database; default `dist/karaoke.db`.
+- `add` searches [LRCLIB](https://lrclib.net) for synced lyrics. `--duration-s <secs>` picks the
+  closest-length recording, `--lrclib-id <n>` pins a record, `--lrc <file>` uses a local LRC file.
+  `--audio <file>` copies a user-owned audio file next to the DB. `--model` overrides the Claude model.
+- Re-running `add` for the same title and artist replaces the song but keeps its timing offset and audio.
+- The CC-CEDICT dictionary is downloaded once into `<db dir>/cache/`.
+
+## Running
+
+Put `karaoke.db` next to `karaoke.exe` (e.g. both in `dist/`) and start `karaoke.exe`, or pass
+`--db <path>`.
+
+Without an audio file the player runs in **sync mode**: start the song in any external player and
+press Space at the same moment, then nudge the offset with `[` / `]` until the highlight matches.
+The offset is saved per song.
+
+| Key | Action |
+|---|---|
+| Space | Play / pause |
+| ← / → | Seek −5 s / +5 s |
+| ↑ / ↓ | Previous / next line |
+| `[` / `]` | Offset −100 ms / +100 ms |
+
+Clicking a character shows its details; the toolbar toggles pinyin, glosses, translations, the
+full lyric sheet and the detail panel.
+
+## Data and credits
+
+- Dictionary: [CC-CEDICT](https://cc-cedict.org/) by MDBG, licensed CC BY-SA 4.0.
+- Synced lyrics: [LRCLIB](https://lrclib.net).
+- Readings, glosses and translations: generated with the [Claude API](https://www.anthropic.com/api).
+- The database (lyrics and translations) and audio files are never committed to this repository;
+  build your own with `karaoke-ingest`.
+
+## License
+
+MIT
