@@ -295,6 +295,7 @@ impl App {
             }
             let duration = self.duration();
             let mut pos = t;
+            ui.spacing_mut().slider_width = (ui.available_width() * 0.35).max(160.0);
             let slider = egui::Slider::new(&mut pos, 0..=duration).show_value(false);
             if ui.add_enabled(enabled, slider).changed() {
                 self.seek_lyric(pos);
